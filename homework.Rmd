@@ -1,0 +1,119 @@
+---
+title: 'Practical Machine Learning: Prediction Assignment'
+author: "DirgniF"
+date: "23 January 2016"
+output: html_document
+---
+
+# Overview
+In this project, we will first load the data.
+Since the test data is in a different file, we can quietly leave it alone until we think we have a model that is good enough.
+We remove some of the columns that hold a lot of invalid values.
+Next, we set aside 25% of the data in the training set in a validation set. We will use this to estimate out-of-sample error rates.
+The first methodology we try, decision trees, results in moderate accuracy.
+We try a second method, support vector machines (svm). This time the estimated out-of-sample error rate is very promising.
+We therefore apply this svm model on the 20 test samples, and obtaining a 20/20 score.
+
+# Prerequisites
+Load the required libraries
+```{r echo=TRUE, Warning=F, Message=F}
+suppressWarnings(library(caret))
+suppressWarnings(library(rattle))
+suppressWarnings(library(e1071))
+```
+
+# Loading the Data
+
+```{r echo=TRUE, Warning=FALSE, cache=TRUE}
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+trainingdata<-read.csv("pml-training.csv",stringsAsFactors = FALSE)
+testing<-read.csv("pml-testing.csv",stringsAsFactors = FALSE)
+```
+
+# Prepare the Data
+Let's have a look at the training data.
+```{r echo=TRUE}
+str(trainingdata[1:25])  # limit output to first 25 columns, for readibility of documention)
+```
+So we have `r ncol(trainingdata)` columns, but it seems there are a lot of columns that mainly hold "" or NAs.
+We define a function "percInvalid" which calculates the percentage of such invalid values in a vector.
+We apply this function to the dataframe columns using apply.
+We decide to only retain features that have less than 10% of invalid entries.
+```{r echo=TRUE,fig.width=13}
+percInvalid<-function(x){(sum(is.na(x))+sum(x=="",na.rm=TRUE))/length(x)}
+FeaturePercInvalid<-apply(trainingdata,2, percInvalid)
+retainFeature<-FeaturePercInvalid<.1
+sum(retainFeature)
+```
+We see that we are now left with `r sum(retainFeature)` features only.
+Furthermore, a good predictor should not rely on the subject that did the test, nor on the window or the timestamp. Finally, the rownumber, X, should not be considered a feature.
+```{r echo=TRUE}
+retainFeature["user_name"]<-FALSE
+retainFeature[grepl("window",names(trainingdata))]<-FALSE
+retainFeature[grepl("time",names(trainingdata))]<-FALSE
+retainFeature["X"]<-FALSE
+sum(retainFeature)
+```
+With this, we are down to `r sum(retainFeature)` features.
+
+
+We retain only the selected features and observe that with this manipulation, we have effectively removed all NAs from the data frame.
+```{r echo=TRUE}
+trainingdata<-trainingdata[,retainFeature]
+nrow(trainingdata[!complete.cases(trainingdata),])
+```
+
+Finally, we turn the classe variable into a factor, and confirm that we have sufficient records for each value of class.
+```{r echo=TRUE}
+trainingdata$classe<-as.factor(trainingdata$classe)
+plot(trainingdata$classe)
+```
+
+# Partioning the Data
+The dataframe trainingdata has `r nrow(trainingdata)` observations. This is plenty, so we can partition this set further in a training set that holds 75% of the observations and a validation set that holds the reminder. This validation set will be used to estimate the out-of-sample error rate.
+```{r echo=TRUE, Warning=FALSE}
+set.seed(314)
+inTrain = createDataPartition(trainingdata$classe, p = 3/4)[[1]]
+training = trainingdata[ inTrain,]
+validation = trainingdata[-inTrain,]
+```
+
+# Attempt 1: Classification and Regression Tree
+
+We use regression trees, and the train function uses repeated cross validation to determine the best model. We also set the tuneLenth to 10 to ensure sufficient granularity in the tuning parameter grid. (The default of 3 is known to be a bit coarse)
+We plot the resulting decision tree.
+```{r echo=TRUE,fig.widt=19,, Warning=F, Message=F}
+modelFit1<-train(classe ~ ., data = training, method = "rpart",tuneLength = 10,trControl=trainControl(method = "repeatedcv"))
+fancyRpartPlot(modelFit1$finalModel)
+```
+
+We now use the model to predict the values in the validation set, and print the confusion matrix.
+```{r echo=TRUE}
+validation1<-predict(modelFit1,validation,type="raw")
+confusionMatrix(validation1,validation$classe)
+```
+
+An out-of-sample error rate of `r round(100*confusionMatrix(validation1,validation$classe)$overall['Accuracy'],0)`% is well below the 80% required to pass the test, so let's try another method.
+
+# Attempt 2: Support Vector Machine
+We build the SVM model, using default settings, and apply it again to the validation set.We print the confusion matrix.
+
+```{r echo=TRUE}
+#modelFit2<-svm(classe ~ ., data = training)
+#validation2<-predict(modelFit2,validation,type="raw")
+#confusionMatrix(validation2,validation$classe)
+#test2<-predict(modelFit2,testing,type="raw")
+a<-1
+```
+
+This time, the out-of-sample error rate of 2% is very promising, and even when we consider the lowerbound of the confidence interval for this estimated error rate: `r round(100*confusionMatrix(validation2,validation$classe)$overall['AccuracyLower'],0)`%, we should be good. 
+# r round(100*confusionMatrix(validation2,validation$classe)$overall['Accuracy'],0)
+# Predict outcome in the Test Set
+We go on to calculate the classification of the test set and submit.
+```{r echo=TRUE}
+retainFeature<-retainFeature[1:length(retainFeature)-1]  #test set does not have a "classe" column
+testing<-testing[,retainFeature]
+#test<-predict(modelFit2,testing,type="raw")
+#test
+```
